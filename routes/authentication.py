@@ -11,7 +11,8 @@ from models.user import Users
 from validation.authentication import (
     validate_email,
     validate_password,
-    validate_username
+    validate_first_name,
+    validate_last_name
 )
 
 authentication = Blueprint("authentication", __name__)
@@ -28,7 +29,8 @@ def perform_login(user):
             "user": {
                 "id": user.id,
                 "email": user.email,
-                "username": user.username,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
                 "phone_number": user.phone_number,
                 "bio": user.bio,
                 "location": user.location,
@@ -49,7 +51,8 @@ def register():
         validation_methods = {
             "email": validate_email,
             "password": validate_password,
-            "username": validate_username
+            "first_name": validate_first_name,
+            "last_name": validate_last_name,
         }
 
         for key, method in validation_methods.items():
@@ -62,7 +65,8 @@ def register():
         new_user = Users(
             password=generate_password_hash(data["password"]),
             email=data["email"],
-            username=data["username"],
+            first_name=data["first_name"],
+            last_name=data["last_name"],
             phone_number=data.get("phone_number"),
             bio=data.get("bio"),
             location=data.get("location"),
@@ -131,7 +135,8 @@ def serialize_user(user):
     return {
         "id": user.id,
         "email": user.email,
-        "username": user.username,
+        "firstName": user.first_name,
+        "lastName": user.last_name,
         "phoneNumber": user.phone_number,
         "bio": user.bio,
         "location": user.location,
@@ -196,26 +201,25 @@ def update_user():
             user.email = data["email"]
 
 
-        if "username" in data and data["username"] != user.username:
-
-            is_valid, message = validate_username(data["username"])
+        if "first_name" in data and data["first_name"] != user.first_name:
+            is_valid, message = validate_first_name(data["first_name"])
 
             if not is_valid:
                 return jsonify({
                     "message": message
                 }), 400
 
-            existing_username = Users.query.filter_by(
-                username=data["username"]
-            ).first()
+            user.first_name = data["first_name"]
 
-            if existing_username:
+        if "last_name" in data and data["last_name"] != user.last_name:
+            is_valid, message = validate_last_name(data["last_name"])
+
+            if not is_valid:
                 return jsonify({
-                    "message": "Username is already taken."
+                    "message": message
                 }), 400
 
-            user.username = data["username"]
-
+            user.last_name = data["last_name"]
 
         if "password" in data:
 

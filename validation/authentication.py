@@ -43,24 +43,39 @@ def validate_password(password):
 
 
 # -----------------------------
-# USERNAME
+# FIRST NAME
 # -----------------------------
-USERNAME_REGEX = r"^[a-zA-Z0-9_-]{3,25}$"
+NAME_REGEX = r"^[A-Za-zÀ-ÖØ-öø-ÿ'\- ]{2,25}$"
 
 
-def validate_username(username):
-    if not username or not isinstance(username, str):
-        return False, 'Username cannot be empty.'
+def validate_first_name(first_name):
+    if not first_name or not isinstance(first_name, str):
+        return False, 'First name is required.'
 
-    username = username.strip()
+    first_name = first_name.strip()
 
-    if len(username) < 3 or len(username) > 25:
-        return False, 'Username must be between 3 and 25 characters.'
+    if len(first_name) < 2 or len(first_name) > 25:
+        return False, 'First name must be between 2 and 25 characters.'
 
-    if not re.match(USERNAME_REGEX, username):
-        return False, 'Username can only contain letters, numbers, underscores, and hyphens.'
+    if not re.match(NAME_REGEX, first_name):
+        return False, 'First name can only contain letters, spaces, hyphens, and apostrophes.'
 
-    if Users.query.filter_by(username=username).first():
-        return False, 'Username already taken.'
+    return True, ''
+
+
+# -----------------------------
+# LAST NAME
+# -----------------------------
+def validate_last_name(last_name):
+    if not last_name or not isinstance(last_name, str):
+        return False, 'Last name is required.'
+
+    last_name = last_name.strip()
+
+    if len(last_name) < 2 or len(last_name) > 25:
+        return False, 'Last name must be between 2 and 25 characters.'
+
+    if not re.match(NAME_REGEX, last_name):
+        return False, 'Last name can only contain letters, spaces, hyphens, and apostrophes.'
 
     return True, ''
