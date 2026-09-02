@@ -5,7 +5,7 @@ import boto3
 from flask import Blueprint, request, jsonify
 
 
-contracts_bp = Blueprint("contracts", __name__)
+contracts = Blueprint("contracts", __name__)
 
 s3 = boto3.client(
     "s3",
@@ -17,7 +17,7 @@ s3 = boto3.client(
 S3_BUCKET = "drg-clauses"
 
 
-@contracts_bp.route("/upload", methods=["POST"])
+@contracts.route("/upload", methods=["POST"])
 def upload_contract():
 
     # Check that a file was included in the request
