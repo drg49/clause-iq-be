@@ -3,6 +3,10 @@ import uuid
 
 import boto3
 from flask import Blueprint, request, jsonify
+from flask_jwt_extended import jwt_required, get_jwt_identity
+
+from models.contract import Contract
+from models import db
 
 
 contracts = Blueprint("contracts", __name__)
@@ -18,7 +22,11 @@ S3_BUCKET = "drg-clauses"
 
 
 @contracts.route("/upload", methods=["POST"])
+@jwt_required()
 def upload_contract():
+
+    # Get the logged-in user's ID
+    user_id = get_jwt_identity()
 
     # Check that a file was included in the request
     if "file" not in request.files:
@@ -45,6 +53,7 @@ def upload_contract():
     s3_key = f"contracts/{file_id}.pdf"
 
     try:
+        # Upload PDF to S3
         s3.upload_fileobj(
             file,
             S3_BUCKET,
@@ -54,12 +63,29 @@ def upload_contract():
             }
         )
 
+        # Create database record
+        contract = Contract(
+            user_id=user_id,
+            name=file.filename,
+            s3_key=s3_key
+        )
+
+        db.session.add(contract)
+        db.session.commit()
+
         return jsonify({
             "message": "Contract uploaded successfully",
-            "s3_key": s3_key
+            "contract": {
+                "id": contract.id,
+                "name": contract.name,
+                "s3_key": contract.s3_key,
+                "created_at": contract.created_at
+            }
         }), 201
 
     except Exception as e:
+        db.session.rollback()
+
         return jsonify({
             "error": str(e)
         }), 500
