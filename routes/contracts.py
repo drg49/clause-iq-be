@@ -20,6 +20,7 @@ s3 = boto3.client(
 
 S3_BUCKET = "drg-clauses"
 
+
 @contracts.route("", methods=["GET"])
 @jwt_required()
 def get_contracts():
@@ -27,12 +28,42 @@ def get_contracts():
     # Get the logged-in user's ID
     user_id = get_jwt_identity()
 
+    # Get pagination parameters
+    try:
+        limit = int(request.args.get("limit", 10))
+        offset = int(request.args.get("offset", 0))
+    except ValueError:
+        return jsonify({
+            "error": "Limit and offset must be integers"
+        }), 400
+
+    # Validate pagination parameters
+    if limit < 1:
+        return jsonify({
+            "error": "Limit must be greater than 0"
+        }), 400
+
+    if offset < 0:
+        return jsonify({
+            "error": "Offset cannot be negative"
+        }), 400
+
     try:
         # Get this user's contracts
-        contracts = Contract.query.filter_by(
+        contracts_query = Contract.query.filter_by(
             user_id=user_id
         ).order_by(
             Contract.created_at.desc()
+        )
+
+        # Get total number of contracts
+        total = contracts_query.count()
+
+        # Apply pagination
+        contracts_list = contracts_query.offset(
+            offset
+        ).limit(
+            limit
         ).all()
 
         return jsonify({
@@ -43,8 +74,13 @@ def get_contracts():
                     "s3_key": contract.s3_key,
                     "created_at": contract.created_at
                 }
-                for contract in contracts
-            ]
+                for contract in contracts_list
+            ],
+            "pagination": {
+                "limit": limit,
+                "offset": offset,
+                "total": total
+            }
         }), 200
 
     except Exception as e:
