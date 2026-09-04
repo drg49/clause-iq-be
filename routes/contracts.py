@@ -20,6 +20,38 @@ s3 = boto3.client(
 
 S3_BUCKET = "drg-clauses"
 
+@contracts.route("", methods=["GET"])
+@jwt_required()
+def get_contracts():
+
+    # Get the logged-in user's ID
+    user_id = get_jwt_identity()
+
+    try:
+        # Get this user's contracts
+        contracts = Contract.query.filter_by(
+            user_id=user_id
+        ).order_by(
+            Contract.created_at.desc()
+        ).all()
+
+        return jsonify({
+            "contracts": [
+                {
+                    "id": contract.id,
+                    "name": contract.name,
+                    "s3_key": contract.s3_key,
+                    "created_at": contract.created_at
+                }
+                for contract in contracts
+            ]
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            "error": str(e)
+        }), 500
+
 
 @contracts.route("/upload", methods=["POST"])
 @jwt_required()
