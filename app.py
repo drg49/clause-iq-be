@@ -21,10 +21,10 @@ app.config["SQLALCHEMY_DATABASE_URI"] = database_uri
 # JWT configuration
 app.config["JWT_SECRET_KEY"] = jwt_secret
 
-# Access token expiration (example: 15 minutes)
-app.config["JWT_ACCESS_TOKEN_EXPIRES"] = 60 * 15
+# Access token expiration: 24 hours
+app.config["JWT_ACCESS_TOKEN_EXPIRES"] = 60 * 60 * 24
 
-# Refresh token expiration (example: 30 days)
+# Refresh token expiration: 30 days
 app.config["JWT_REFRESH_TOKEN_EXPIRES"] = 60 * 60 * 24 * 30
 
 
