@@ -72,6 +72,7 @@ def get_contracts():
                     "id": contract.id,
                     "name": contract.name,
                     "s3_key": contract.s3_key,
+                    "status": contract.status,
                     "created_at": contract.created_at
                 }
                 for contract in contracts_list
@@ -147,6 +148,7 @@ def upload_contract():
                 "id": contract.id,
                 "name": contract.name,
                 "s3_key": contract.s3_key,
+                "status": contract.status,
                 "created_at": contract.created_at
             }
         }), 201
