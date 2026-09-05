@@ -6,7 +6,10 @@ from models import db
 class Contract(db.Model):
     __tablename__ = "contracts"
 
-    id = db.Column(db.Integer, primary_key=True)
+    id = db.Column(
+        db.Integer,
+        primary_key=True
+    )
 
     # Owner
     user_id = db.Column(
@@ -27,9 +30,23 @@ class Contract(db.Model):
         nullable=False
     )
 
+    # Analysis status
+    status = db.Column(
+        db.Enum(
+            "UPLOADED",
+            "ANALYZING",
+            "ANALYZED",
+            "FAILED",
+            name="contract_analysis_status"
+        ),
+        nullable=False,
+        default="UPLOADED"
+    )
+
     # Timestamp
     created_at = db.Column(
         db.DateTime,
         nullable=False,
         default=datetime.utcnow
     )
+    
