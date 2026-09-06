@@ -1,52 +1,288 @@
-from datetime import datetime
+import os
+import uuid
 
+import boto3
+from flask import Blueprint, request, jsonify
+from flask_jwt_extended import jwt_required, get_jwt_identity
+
+from models.contract import Contract
 from models import db
 
+from tasks.executor import executor
+from tasks.contract_analysis import analyze_contract
 
-class Contract(db.Model):
-    __tablename__ = "contracts"
 
-    id = db.Column(
-        db.Integer,
-        primary_key=True
-    )
+contracts = Blueprint("contracts", __name__)
 
-    # Owner
-    user_id = db.Column(
-        db.Integer,
-        db.ForeignKey("users.id"),
-        nullable=False
-    )
+s3 = boto3.client(
+    "s3",
+    aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
+    aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
+    region_name=os.getenv("AWS_REGION")
+)
 
-    # Contract information
-    name = db.Column(
-        db.String(255),
-        nullable=False
-    )
+S3_BUCKET = "drg-clauses"
 
-    # S3
-    s3_key = db.Column(
-        db.String(500),
-        nullable=False
-    )
 
-    # Analysis status
-    status = db.Column(
-        db.Enum(
-            "UPLOADED",
-            "ANALYZING",
-            "ANALYZED",
-            "FAILED",
-            name="contract_analysis_status"
-        ),
-        nullable=False,
-        default="UPLOADED"
-    )
+@contracts.route("", methods=["GET"])
+@jwt_required()
+def get_contracts():
 
-    # Timestamp
-    created_at = db.Column(
-        db.DateTime,
-        nullable=False,
-        default=datetime.utcnow
-    )
-    
+    # Get the logged-in user's ID
+    user_id = get_jwt_identity()
+
+    # Get pagination parameters
+    try:
+        limit = int(request.args.get("limit", 10))
+        offset = int(request.args.get("offset", 0))
+    except ValueError:
+        return jsonify({
+            "error": "Limit and offset must be integers"
+        }), 400
+
+    # Validate pagination parameters
+    if limit < 1:
+        return jsonify({
+            "error": "Limit must be greater than 0"
+        }), 400
+
+    if offset < 0:
+        return jsonify({
+            "error": "Offset cannot be negative"
+        }), 400
+
+    try:
+        # Get this user's contracts
+        contracts_query = Contract.query.filter_by(
+            user_id=user_id
+        ).order_by(
+            Contract.created_at.desc()
+        )
+
+        # Get total number of contracts
+        total = contracts_query.count()
+
+        # Apply pagination
+        contracts_list = contracts_query.offset(
+            offset
+        ).limit(
+            limit
+        ).all()
+
+        return jsonify({
+            "contracts": [
+                {
+                    "id": contract.id,
+                    "name": contract.name,
+                    "s3_key": contract.s3_key,
+                    "status": contract.status,
+                    "created_at": contract.created_at
+                }
+                for contract in contracts_list
+            ],
+            "pagination": {
+                "limit": limit,
+                "offset": offset,
+                "total": total
+            }
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            "error": str(e)
+        }), 500
+
+
+@contracts.route("/upload", methods=["POST"])
+@jwt_required()
+def upload_contract():
+
+    # Get the logged-in user's ID
+    user_id = get_jwt_identity()
+
+    # Check that a file was included in the request
+    if "file" not in request.files:
+        return jsonify({
+            "error": "No file provided"
+        }), 400
+
+    file = request.files["file"]
+
+    # Check that the user actually selected a file
+    if file.filename == "":
+        return jsonify({
+            "error": "No file selected"
+        }), 400
+
+    # Make sure the file is a PDF
+    if not file.filename.lower().endswith(".pdf"):
+        return jsonify({
+            "error": "Only PDF files are allowed"
+        }), 400
+
+    # Generate a unique filename for S3
+    file_id = str(uuid.uuid4())
+    s3_key = f"contracts/{file_id}.pdf"
+
+    try:
+        # Upload PDF to S3
+        s3.upload_fileobj(
+            file,
+            S3_BUCKET,
+            s3_key,
+            ExtraArgs={
+                "ContentType": "application/pdf"
+            }
+        )
+
+        # Create database record
+        contract = Contract(
+            user_id=user_id,
+            name=file.filename,
+            s3_key=s3_key
+        )
+
+        db.session.add(contract)
+        db.session.commit()
+
+        return jsonify({
+            "message": "Contract uploaded successfully",
+            "contract": {
+                "id": contract.id,
+                "name": contract.name,
+                "s3_key": contract.s3_key,
+                "status": contract.status,
+                "created_at": contract.created_at
+            }
+        }), 201
+
+    except Exception as e:
+        db.session.rollback()
+
+        return jsonify({
+            "error": str(e)
+        }), 500
+
+
+@contracts.route("/<int:contract_id>/analyze", methods=["POST"])
+@jwt_required()
+def analyze_contract_endpoint(contract_id):
+
+    # Get the logged-in user's ID
+    user_id = get_jwt_identity()
+
+    try:
+        # Find the contract belonging to the logged-in user
+        contract = Contract.query.filter_by(
+            id=contract_id,
+            user_id=user_id
+        ).first()
+
+        # Contract doesn't exist or doesn't belong to this user
+        if not contract:
+            return jsonify({
+                "error": "Contract not found"
+            }), 404
+
+        # Don't analyze a contract that has already been analyzed
+        if contract.status == "ANALYZED":
+            return jsonify({
+                "error": "Contract has already been analyzed"
+            }), 409
+
+        # Don't allow the same contract to be queued twice
+        if contract.status == "QUEUED":
+            return jsonify({
+                "error": "Contract analysis is already queued"
+            }), 409
+
+        # Don't allow the same contract to be analyzed twice
+        if contract.status == "ANALYZING":
+            return jsonify({
+                "error": "Contract analysis is already in progress"
+            }), 409
+
+        # Check whether this user already has another
+        # contract queued or being analyzed
+        active_analysis = Contract.query.filter(
+            Contract.user_id == user_id,
+            Contract.status.in_([
+                "QUEUED",
+                "ANALYZING"
+            ]),
+            Contract.id != contract.id
+        ).first()
+
+        if active_analysis:
+            return jsonify({
+                "error": "You already have a contract being analyzed"
+            }), 409
+
+        # Put the contract into the queue
+        contract.status = "QUEUED"
+
+        db.session.commit()
+
+        # Submit the contract analysis to the thread pool
+        executor.submit(
+            analyze_contract,
+            contract.id
+        )
+
+        return jsonify({
+            "message": "Contract analysis queued",
+            "contract": {
+                "id": contract.id,
+                "name": contract.name,
+                "status": contract.status
+            }
+        }), 202
+
+    except Exception as e:
+        db.session.rollback()
+
+        return jsonify({
+            "error": str(e)
+        }), 500
+
+
+@contracts.route("/<int:contract_id>", methods=["DELETE"])
+@jwt_required()
+def delete_contract(contract_id):
+
+    # Get the logged-in user's ID
+    user_id = get_jwt_identity()
+
+    try:
+        # Find the contract belonging to the logged-in user
+        contract = Contract.query.filter_by(
+            id=contract_id,
+            user_id=user_id
+        ).first()
+
+        # Contract doesn't exist or doesn't belong to this user
+        if not contract:
+            return jsonify({
+                "error": "Contract not found"
+            }), 404
+
+        # Delete the PDF from S3
+        s3.delete_object(
+            Bucket=S3_BUCKET,
+            Key=contract.s3_key
+        )
+
+        # Delete the database record
+        db.session.delete(contract)
+        db.session.commit()
+
+        return jsonify({
+            "message": "Contract deleted successfully"
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+
+        return jsonify({
+            "error": str(e)
+        }), 500
