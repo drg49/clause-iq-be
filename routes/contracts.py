@@ -8,6 +8,9 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from models.contract import Contract
 from models import db
 
+from tasks.executor import executor
+from tasks.contract_analysis import analyze_contract
+
 
 contracts = Blueprint("contracts", __name__)
 
@@ -163,7 +166,7 @@ def upload_contract():
 
 @contracts.route("/<int:contract_id>/analyze", methods=["POST"])
 @jwt_required()
-def analyze_contract(contract_id):
+def analyze_contract_endpoint(contract_id):
 
     # Get the logged-in user's ID
     user_id = get_jwt_identity()
@@ -181,25 +184,53 @@ def analyze_contract(contract_id):
                 "error": "Contract not found"
             }), 404
 
-        # Don't start analysis if the contract is already being analyzed
-        if contract.status == "ANALYZING":
-            return jsonify({
-                "error": "Contract analysis is already in progress"
-            }), 409
-
         # Don't analyze a contract that has already been analyzed
         if contract.status == "ANALYZED":
             return jsonify({
                 "error": "Contract has already been analyzed"
             }), 409
 
-        # Update contract status
-        contract.status = "ANALYZING"
+        # Don't allow the same contract to be queued twice
+        if contract.status == "QUEUED":
+            return jsonify({
+                "error": "Contract analysis is already queued"
+            }), 409
+
+        # Don't allow the same contract to be analyzed twice
+        if contract.status == "ANALYZING":
+            return jsonify({
+                "error": "Contract analysis is already in progress"
+            }), 409
+
+        # Check whether this user already has another
+        # contract queued or being analyzed
+        active_analysis = Contract.query.filter(
+            Contract.user_id == user_id,
+            Contract.status.in_([
+                "QUEUED",
+                "ANALYZING"
+            ]),
+            Contract.id != contract.id
+        ).first()
+
+        if active_analysis:
+            return jsonify({
+                "error": "You already have a contract being analyzed"
+            }), 409
+
+        # Put the contract into the queue
+        contract.status = "QUEUED"
 
         db.session.commit()
 
+        # Submit the contract analysis to the thread pool
+        executor.submit(
+            analyze_contract,
+            contract.id
+        )
+
         return jsonify({
-            "message": "Contract analysis started",
+            "message": "Contract analysis queued",
             "contract": {
                 "id": contract.id,
                 "name": contract.name,
