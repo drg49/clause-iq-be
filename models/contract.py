@@ -33,15 +33,14 @@ class Contract(db.Model):
     # Analysis status
     status = db.Column(
         db.Enum(
-            "UPLOADED",
-            "QUEUED",
+            "PENDING",
             "ANALYZING",
             "ANALYZED",
             "FAILED",
             name="contract_analysis_status"
         ),
         nullable=False,
-        default="UPLOADED"
+        default="PENDING"
     )
 
     # Timestamp
@@ -50,4 +49,3 @@ class Contract(db.Model):
         nullable=False,
         default=datetime.utcnow
     )
-    

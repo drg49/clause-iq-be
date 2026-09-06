@@ -139,11 +139,18 @@ def upload_contract():
         contract = Contract(
             user_id=user_id,
             name=file.filename,
-            s3_key=s3_key
+            s3_key=s3_key,
+            status="PENDING"
         )
 
         db.session.add(contract)
         db.session.commit()
+
+        # Submit the contract analysis to the thread pool
+        executor.submit(
+            analyze_contract,
+            contract.id
+        )
 
         return jsonify({
             "message": "Contract uploaded successfully",
@@ -155,88 +162,6 @@ def upload_contract():
                 "created_at": contract.created_at
             }
         }), 201
-
-    except Exception as e:
-        db.session.rollback()
-
-        return jsonify({
-            "error": str(e)
-        }), 500
-
-
-@contracts.route("/<int:contract_id>/analyze", methods=["POST"])
-@jwt_required()
-def analyze_contract_endpoint(contract_id):
-
-    # Get the logged-in user's ID
-    user_id = get_jwt_identity()
-
-    try:
-        # Find the contract belonging to the logged-in user
-        contract = Contract.query.filter_by(
-            id=contract_id,
-            user_id=user_id
-        ).first()
-
-        # Contract doesn't exist or doesn't belong to this user
-        if not contract:
-            return jsonify({
-                "error": "Contract not found"
-            }), 404
-
-        # Don't analyze a contract that has already been analyzed
-        if contract.status == "ANALYZED":
-            return jsonify({
-                "error": "Contract has already been analyzed"
-            }), 409
-
-        # Don't allow the same contract to be queued twice
-        if contract.status == "QUEUED":
-            return jsonify({
-                "error": "Contract analysis is already queued"
-            }), 409
-
-        # Don't allow the same contract to be analyzed twice
-        if contract.status == "ANALYZING":
-            return jsonify({
-                "error": "Contract analysis is already in progress"
-            }), 409
-
-        # Check whether this user already has another
-        # contract queued or being analyzed
-        active_analysis = Contract.query.filter(
-            Contract.user_id == user_id,
-            Contract.status.in_([
-                "QUEUED",
-                "ANALYZING"
-            ]),
-            Contract.id != contract.id
-        ).first()
-
-        if active_analysis:
-            return jsonify({
-                "error": "You already have a contract being analyzed"
-            }), 409
-
-        # Put the contract into the queue
-        contract.status = "QUEUED"
-
-        db.session.commit()
-
-        # Submit the contract analysis to the thread pool
-        executor.submit(
-            analyze_contract,
-            contract.id
-        )
-
-        return jsonify({
-            "message": "Contract analysis queued",
-            "contract": {
-                "id": contract.id,
-                "name": contract.name,
-                "status": contract.status
-            }
-        }), 202
 
     except Exception as e:
         db.session.rollback()
