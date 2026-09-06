@@ -1,6 +1,5 @@
 import time
 
-from app import app
 from models import db
 from models.contract import Contract
 
@@ -12,6 +11,8 @@ def analyze_contract(contract_id):
     This is currently a placeholder. The actual PDF extraction,
     RAG, and Gemini analysis will be added later.
     """
+
+    from app import app
 
     with app.app_context():
 
