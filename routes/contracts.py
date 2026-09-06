@@ -161,6 +161,60 @@ def upload_contract():
         }), 500
 
 
+@contracts.route("/<int:contract_id>/analyze", methods=["POST"])
+@jwt_required()
+def analyze_contract(contract_id):
+
+    # Get the logged-in user's ID
+    user_id = get_jwt_identity()
+
+    try:
+        # Find the contract belonging to the logged-in user
+        contract = Contract.query.filter_by(
+            id=contract_id,
+            user_id=user_id
+        ).first()
+
+        # Contract doesn't exist or doesn't belong to this user
+        if not contract:
+            return jsonify({
+                "error": "Contract not found"
+            }), 404
+
+        # Don't start analysis if the contract is already being analyzed
+        if contract.status == "ANALYZING":
+            return jsonify({
+                "error": "Contract analysis is already in progress"
+            }), 409
+
+        # Don't analyze a contract that has already been analyzed
+        if contract.status == "ANALYZED":
+            return jsonify({
+                "error": "Contract has already been analyzed"
+            }), 409
+
+        # Update contract status
+        contract.status = "ANALYZING"
+
+        db.session.commit()
+
+        return jsonify({
+            "message": "Contract analysis started",
+            "contract": {
+                "id": contract.id,
+                "name": contract.name,
+                "status": contract.status
+            }
+        }), 202
+
+    except Exception as e:
+        db.session.rollback()
+
+        return jsonify({
+            "error": str(e)
+        }), 500
+
+
 @contracts.route("/<int:contract_id>", methods=["DELETE"])
 @jwt_required()
 def delete_contract(contract_id):
