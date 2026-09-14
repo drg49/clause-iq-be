@@ -1,7 +1,9 @@
 import os
 import time
+from io import BytesIO
 
 import boto3
+from pypdf import PdfReader
 
 from models import db
 from models.contract import Contract
@@ -28,10 +30,11 @@ def analyze_contract(contract_id):
     1. Wait for the user's other analysis to finish.
     2. Mark the contract as ANALYZING.
     3. Download the PDF from S3.
-    4. Confirm the PDF was downloaded successfully.
+    4. Extract text from the PDF.
+    5. Confirm the text was extracted successfully.
 
-    PDF text extraction, chunking, embeddings, RAG,
-    Gemini analysis, and result storage will be added later.
+    Chunking, embeddings, RAG, Gemini analysis,
+    and result storage will be added later.
     """
 
     from app import app
@@ -90,6 +93,38 @@ def analyze_contract(contract_id):
             print(
                 f"Downloaded {contract.name} "
                 f"from S3 ({len(pdf_bytes)} bytes)"
+            )
+
+            # Create a PDF reader from the downloaded bytes
+            pdf = PdfReader(
+                BytesIO(pdf_bytes)
+            )
+
+            # Extract text from every page
+            extracted_text = ""
+
+            for page in pdf.pages:
+                page_text = page.extract_text()
+
+                if page_text:
+                    extracted_text += page_text + "\n"
+
+            # Confirm that text was extracted
+            if not extracted_text.strip():
+                raise ValueError(
+                    "No text could be extracted from the PDF"
+                )
+
+            print(
+                f"Extracted {len(extracted_text)} characters "
+                f"from {contract.name}"
+            )
+
+            # Print a small preview so we can verify the extraction
+            print(
+                "\n--- Extracted Text Preview ---\n"
+                f"{extracted_text[:500]}"
+                "\n--- End Preview ---\n"
             )
 
             # Temporary status update.
