@@ -1,7 +1,20 @@
+import os
 import time
+
+import boto3
 
 from models import db
 from models.contract import Contract
+
+
+S3_BUCKET = "drg-clauses"
+
+s3 = boto3.client(
+    "s3",
+    aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
+    aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
+    region_name=os.getenv("AWS_REGION")
+)
 
 
 def analyze_contract(contract_id):
@@ -11,17 +24,28 @@ def analyze_contract(contract_id):
     A user can only have one contract actively analyzed at a time.
     Contracts that are waiting for their turn remain PENDING.
 
-    This is currently a placeholder. The actual PDF extraction,
-    RAG, and Gemini analysis will be added later.
+    Current step:
+    1. Wait for the user's other analysis to finish.
+    2. Mark the contract as ANALYZING.
+    3. Download the PDF from S3.
+    4. Confirm the PDF was downloaded successfully.
+
+    PDF text extraction, chunking, embeddings, RAG,
+    Gemini analysis, and result storage will be added later.
     """
 
     from app import app
 
     with app.app_context():
 
+        contract = None
+
         try:
             # Find the contract
-            contract = db.session.get(Contract, contract_id)
+            contract = db.session.get(
+                Contract,
+                contract_id
+            )
 
             if not contract:
                 return
@@ -49,15 +73,38 @@ def analyze_contract(contract_id):
             contract.status = "ANALYZING"
             db.session.commit()
 
-            # Simulate a long-running analysis
-            time.sleep(10)
+            # Download the PDF from S3
+            s3_response = s3.get_object(
+                Bucket=S3_BUCKET,
+                Key=contract.s3_key
+            )
 
-            # Mark the contract as analyzed
+            pdf_bytes = s3_response["Body"].read()
+
+            # Confirm that the PDF was downloaded
+            if not pdf_bytes:
+                raise ValueError(
+                    "Downloaded PDF is empty"
+                )
+
+            print(
+                f"Downloaded {contract.name} "
+                f"from S3 ({len(pdf_bytes)} bytes)"
+            )
+
+            # Temporary status update.
+            # This will eventually happen only after
+            # the complete analysis pipeline succeeds.
             contract.status = "ANALYZED"
             db.session.commit()
 
-        except Exception:
+        except Exception as e:
             db.session.rollback()
+
+            print(
+                f"Contract analysis failed for "
+                f"contract {contract_id}: {e}"
+            )
 
             # Mark the contract as failed
             try:
