@@ -3,6 +3,7 @@ import time
 from io import BytesIO
 
 import boto3
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pypdf import PdfReader
 
 from models import db
@@ -19,6 +20,21 @@ s3 = boto3.client(
 )
 
 
+# Text splitter used to divide contract text into
+# smaller pieces for the RAG pipeline.
+text_splitter = RecursiveCharacterTextSplitter(
+    chunk_size=1000,
+    chunk_overlap=150,
+    separators=[
+        "\n\n",
+        "\n",
+        ". ",
+        " ",
+        ""
+    ]
+)
+
+
 def analyze_contract(contract_id):
     """
     Background task for analyzing a contract.
@@ -26,14 +42,14 @@ def analyze_contract(contract_id):
     A user can only have one contract actively analyzed at a time.
     Contracts that are waiting for their turn remain PENDING.
 
-    Current step:
+    Current pipeline:
     1. Wait for the user's other analysis to finish.
     2. Mark the contract as ANALYZING.
     3. Download the PDF from S3.
     4. Extract text from the PDF.
-    5. Confirm the text was extracted successfully.
+    5. Split the text into overlapping chunks.
 
-    Chunking, embeddings, RAG, Gemini analysis,
+    Embeddings, RAG, Gemini analysis,
     and result storage will be added later.
     """
 
@@ -76,7 +92,10 @@ def analyze_contract(contract_id):
             contract.status = "ANALYZING"
             db.session.commit()
 
-            # Download the PDF from S3
+            # --------------------------------------------------
+            # STEP 1: Download PDF from S3
+            # --------------------------------------------------
+
             s3_response = s3.get_object(
                 Bucket=S3_BUCKET,
                 Key=contract.s3_key
@@ -84,7 +103,6 @@ def analyze_contract(contract_id):
 
             pdf_bytes = s3_response["Body"].read()
 
-            # Confirm that the PDF was downloaded
             if not pdf_bytes:
                 raise ValueError(
                     "Downloaded PDF is empty"
@@ -95,21 +113,23 @@ def analyze_contract(contract_id):
                 f"from S3 ({len(pdf_bytes)} bytes)"
             )
 
-            # Create a PDF reader from the downloaded bytes
+            # --------------------------------------------------
+            # STEP 2: Extract text from PDF
+            # --------------------------------------------------
+
             pdf = PdfReader(
                 BytesIO(pdf_bytes)
             )
 
-            # Extract text from every page
             extracted_text = ""
 
             for page in pdf.pages:
+
                 page_text = page.extract_text()
 
                 if page_text:
                     extracted_text += page_text + "\n"
 
-            # Confirm that text was extracted
             if not extracted_text.strip():
                 raise ValueError(
                     "No text could be extracted from the PDF"
@@ -120,12 +140,33 @@ def analyze_contract(contract_id):
                 f"from {contract.name}"
             )
 
-            # Print a small preview so we can verify the extraction
-            print(
-                "\n--- Extracted Text Preview ---\n"
-                f"{extracted_text[:500]}"
-                "\n--- End Preview ---\n"
+            # --------------------------------------------------
+            # STEP 3: Split text into chunks
+            # --------------------------------------------------
+
+            chunks = text_splitter.split_text(
+                extracted_text
             )
+
+            if not chunks:
+                raise ValueError(
+                    "No chunks were created from the extracted text"
+                )
+
+            print(
+                f"Created {len(chunks)} chunks "
+                f"from {contract.name}"
+            )
+
+            # Print the first two chunks so we can
+            # inspect the chunking behavior.
+            for index, chunk in enumerate(chunks[:2]):
+
+                print(
+                    f"\n--- Chunk {index + 1} ---\n"
+                    f"{chunk}"
+                    f"\n--- End Chunk {index + 1} ---\n"
+                )
 
             # Temporary status update.
             # This will eventually happen only after
@@ -134,6 +175,7 @@ def analyze_contract(contract_id):
             db.session.commit()
 
         except Exception as e:
+
             db.session.rollback()
 
             print(
@@ -143,6 +185,7 @@ def analyze_contract(contract_id):
 
             # Mark the contract as failed
             try:
+
                 contract = db.session.get(
                     Contract,
                     contract_id
@@ -153,7 +196,9 @@ def analyze_contract(contract_id):
                     db.session.commit()
 
             except Exception:
+
                 db.session.rollback()
 
         finally:
+
             db.session.remove()
