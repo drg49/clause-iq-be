@@ -3,6 +3,8 @@ import time
 from io import BytesIO
 
 import boto3
+from google import genai
+from google.genai import types
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pypdf import PdfReader
 
@@ -17,6 +19,12 @@ s3 = boto3.client(
     aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
     aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
     region_name=os.getenv("AWS_REGION")
+)
+
+
+# Gemini client used to generate embeddings.
+gemini_client = genai.Client(
+    api_key=os.getenv("GEMINI_API_KEY")
 )
 
 
@@ -35,6 +43,22 @@ text_splitter = RecursiveCharacterTextSplitter(
 )
 
 
+def generate_embedding(text):
+    """
+    Generate a single embedding for a piece of text.
+    """
+
+    result = gemini_client.models.embed_content(
+        model="gemini-embedding-2",
+        contents=text,
+        config=types.EmbedContentConfig(
+            output_dimensionality=768
+        )
+    )
+
+    return result.embeddings[0].values
+
+
 def analyze_contract(contract_id):
     """
     Background task for analyzing a contract.
@@ -48,8 +72,9 @@ def analyze_contract(contract_id):
     3. Download the PDF from S3.
     4. Extract text from the PDF.
     5. Split the text into overlapping chunks.
+    6. Generate an embedding for each chunk.
 
-    Embeddings, RAG, Gemini analysis,
+    Vector storage, retrieval, Gemini analysis,
     and result storage will be added later.
     """
 
@@ -158,19 +183,51 @@ def analyze_contract(contract_id):
                 f"from {contract.name}"
             )
 
-            # Print the first two chunks so we can
-            # inspect the chunking behavior.
-            for index, chunk in enumerate(chunks[:2]):
+            # --------------------------------------------------
+            # STEP 4: Generate embeddings
+            # --------------------------------------------------
 
-                print(
-                    f"\n--- Chunk {index + 1} ---\n"
-                    f"{chunk}"
-                    f"\n--- End Chunk {index + 1} ---\n"
+            embeddings = []
+
+            for index, chunk in enumerate(chunks):
+
+                embedding = generate_embedding(
+                    chunk
                 )
 
+                embeddings.append(embedding)
+
+                print(
+                    f"Generated embedding "
+                    f"{index + 1}/{len(chunks)} "
+                    f"({len(embedding)} dimensions)"
+                )
+
+            if len(embeddings) != len(chunks):
+                raise ValueError(
+                    "Number of embeddings does not match "
+                    "number of chunks"
+                )
+
+            print(
+                f"Successfully generated "
+                f"{len(embeddings)} embeddings"
+            )
+
+            # Print information about the first embedding
+            print(
+                f"First embedding dimensions: "
+                f"{len(embeddings[0])}"
+            )
+
+            print(
+                f"First embedding preview: "
+                f"{embeddings[0][:5]}"
+            )
+
             # Temporary status update.
-            # This will eventually happen only after
-            # the complete analysis pipeline succeeds.
+            # We will eventually mark the contract as ANALYZED
+            # only after the complete pipeline succeeds.
             contract.status = "ANALYZED"
             db.session.commit()
 
