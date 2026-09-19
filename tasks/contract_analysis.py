@@ -43,20 +43,120 @@ text_splitter = RecursiveCharacterTextSplitter(
 )
 
 
-def generate_embedding(text):
+# Gemini Embedding 2 has an 8,192-token input limit.
+#
+# We use a conservative character limit when grouping chunks
+# into a single embedding request. This keeps the combined
+# request comfortably below the model's token limit without
+# requiring a tokenizer just to determine batch boundaries.
+EMBEDDING_BATCH_CHARACTER_LIMIT = 24000
+
+
+def generate_embeddings(chunks, contract_name):
     """
-    Generate a single embedding for a piece of text.
+    Generate one embedding per contract chunk.
+
+    Multiple chunks are sent in a single embed_content request
+    using separate Content objects. Gemini Embedding 2 returns
+    one embedding for each Content object.
+
+    Chunks are divided into smaller batches so the combined
+    request stays within Gemini's input limits.
     """
+
+    embeddings = []
+
+    current_batch = []
+    current_batch_characters = 0
+
+    for chunk in chunks:
+
+        chunk_length = len(chunk)
+
+        # If adding this chunk would exceed the batch size,
+        # process the current batch before starting a new one.
+        if (
+            current_batch
+            and current_batch_characters + chunk_length
+            > EMBEDDING_BATCH_CHARACTER_LIMIT
+        ):
+            batch_embeddings = _embed_batch(
+                current_batch,
+                contract_name
+            )
+
+            embeddings.extend(
+                batch_embeddings
+            )
+
+            current_batch = []
+            current_batch_characters = 0
+
+        current_batch.append(chunk)
+        current_batch_characters += chunk_length
+
+    # Process the final batch.
+    if current_batch:
+
+        batch_embeddings = _embed_batch(
+            current_batch,
+            contract_name
+        )
+
+        embeddings.extend(
+            batch_embeddings
+        )
+
+    return embeddings
+
+
+def _embed_batch(chunks, contract_name):
+    """
+    Generate separate embeddings for a single batch of chunks.
+    """
+
+    contents = []
+
+    for chunk in chunks:
+
+        document_text = (
+            f"title: {contract_name} | "
+            f"text: {chunk}"
+        )
+
+        contents.append(
+            types.Content(
+                parts=[
+                    types.Part.from_text(
+                        text=document_text
+                    )
+                ]
+            )
+        )
 
     result = gemini_client.models.embed_content(
         model="gemini-embedding-2",
-        contents=text,
+        contents=contents,
         config=types.EmbedContentConfig(
             output_dimensionality=768
         )
     )
 
-    return result.embeddings[0].values
+    if not result.embeddings:
+        raise ValueError(
+            "Gemini returned no embeddings"
+        )
+
+    if len(result.embeddings) != len(chunks):
+        raise ValueError(
+            "Number of embeddings returned by Gemini "
+            "does not match the number of chunks"
+        )
+
+    return [
+        embedding.values
+        for embedding in result.embeddings
+    ]
 
 
 def analyze_contract(contract_id):
@@ -72,7 +172,7 @@ def analyze_contract(contract_id):
     3. Download the PDF from S3.
     4. Extract text from the PDF.
     5. Split the text into overlapping chunks.
-    6. Generate an embedding for each chunk.
+    6. Generate embeddings for the chunks.
 
     Vector storage, retrieval, Gemini analysis,
     and result storage will be added later.
@@ -187,26 +287,15 @@ def analyze_contract(contract_id):
             # STEP 4: Generate embeddings
             # --------------------------------------------------
 
-            embeddings = []
-
-            for index, chunk in enumerate(chunks):
-
-                embedding = generate_embedding(
-                    chunk
-                )
-
-                embeddings.append(embedding)
-
-                print(
-                    f"Generated embedding "
-                    f"{index + 1}/{len(chunks)} "
-                    f"({len(embedding)} dimensions)"
-                )
+            embeddings = generate_embeddings(
+                chunks,
+                contract.name
+            )
 
             if len(embeddings) != len(chunks):
                 raise ValueError(
                     "Number of embeddings does not match "
-                    "number of chunks"
+                    "the number of chunks"
                 )
 
             print(
