@@ -133,6 +133,11 @@ def _embed_batch(chunks, contract_name):
                 ]
             )
         )
+    #   contents = [
+    #       Content(parts=[Part("title: Doc | text: Chunk 1")]),  # <-- Treated as Prompt / Input 1
+    #       Content(parts=[Part("title: Doc | text: Chunk 2")]),  # <-- Treated as Prompt / Input 2
+    #       Content(parts=[Part("title: Doc | text: Chunk 3")])   # <-- Treated as Prompt / Input 3
+    #   ]
 
     result = gemini_client.models.embed_content(
         model="gemini-embedding-2",
@@ -141,6 +146,13 @@ def _embed_batch(chunks, contract_name):
             output_dimensionality=768
         )
     )
+
+    # Result from embed_content
+    # result.embeddings = [
+    #     Embedding(values=[... 768 floats for Chunk 1 ...]),
+    #     Embedding(values=[... 768 floats for Chunk 2 ...]),
+    #     Embedding(values=[... 768 floats for Chunk 3 ...])
+    # ]
 
     if not result.embeddings:
         raise ValueError(
