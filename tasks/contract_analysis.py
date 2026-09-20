@@ -30,6 +30,7 @@ gemini_client = genai.Client(
 
 # Text splitter used to divide contract text into
 # smaller pieces for the RAG pipeline.
+# 1000 character limit with 150 character overlap
 text_splitter = RecursiveCharacterTextSplitter(
     chunk_size=1000,
     chunk_overlap=150,
