@@ -10,6 +10,7 @@ from pypdf import PdfReader
 
 from models import db
 from models.contract import Contract
+from models.contract_chunk import ContractChunk
 
 
 S3_BUCKET = "drg-clauses"
@@ -186,8 +187,9 @@ def analyze_contract(contract_id):
     4. Extract text from the PDF.
     5. Split the text into overlapping chunks.
     6. Generate embeddings for the chunks.
+    7. Store chunks and embeddings in PostgreSQL.
 
-    Vector storage, retrieval, Gemini analysis,
+    Vector retrieval, Gemini analysis,
     and result storage will be added later.
     """
 
@@ -327,9 +329,49 @@ def analyze_contract(contract_id):
                 f"{embeddings[0][:5]}"
             )
 
-            # Temporary status update.
-            # We will eventually mark the contract as ANALYZED
-            # only after the complete pipeline succeeds.
+            # --------------------------------------------------
+            # STEP 5: Store chunks and embeddings
+            # --------------------------------------------------
+
+            # Remove any existing chunks for this contract.
+            #
+            # This prevents duplicate chunks if the contract is
+            # analyzed again or the analysis is retried.
+            ContractChunk.query.filter_by(
+                contract_id=contract.id
+            ).delete(
+                synchronize_session=False
+            )
+
+            # Create one database record for each chunk and
+            # its corresponding embedding.
+            for chunk_index, (chunk, embedding) in enumerate(
+                zip(chunks, embeddings)
+            ):
+
+                contract_chunk = ContractChunk(
+                    contract_id=contract.id,
+                    chunk_index=chunk_index,
+                    content=chunk,
+                    embedding=embedding
+                )
+
+                db.session.add(
+                    contract_chunk
+                )
+
+            # Commit all chunks and embeddings together.
+            db.session.commit()
+
+            print(
+                f"Stored {len(chunks)} chunks and embeddings "
+                f"for {contract.name}"
+            )
+
+            # --------------------------------------------------
+            # STEP 6: Mark analysis as complete
+            # --------------------------------------------------
+
             contract.status = "ANALYZED"
             db.session.commit()
 
