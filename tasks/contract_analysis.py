@@ -27,7 +27,7 @@ s3 = boto3.client(
 )
 
 
-# Gemini client used to generate embeddings.
+# Gemini client used to generate embeddings and analysis.
 gemini_client = genai.Client(
     api_key=os.getenv("GEMINI_API_KEY")
 )
@@ -58,7 +58,8 @@ text_splitter = RecursiveCharacterTextSplitter(
 EMBEDDING_BATCH_CHARACTER_LIMIT = 24000
 
 
-# The following queries are used to retrieve relevant contract chunks for each area of analysis.
+# The following queries are used to retrieve relevant contract
+# chunks for each area of analysis.
 ANALYSIS_QUERIES = [
     "What are the termination rights, termination conditions, notice requirements, and penalties in this contract?",
     "What are the parties' payment obligations, fees, late charges, and financial penalties?",
@@ -66,6 +67,7 @@ ANALYSIS_QUERIES = [
     "What obligations, protections, or requirements are missing that could create risk for a party?",
     "What provisions could provide an opportunity to negotiate more favorable terms?"
 ]
+
 
 # Schema for validating the structure of analysis responses from Gemini.
 # Ensures that the findings returned by Gemini adhere to the expected format.
@@ -207,6 +209,7 @@ def _embed_batch(chunks, contract_name):
                 ]
             )
         )
+    #   This is what contents looks like:
     #   contents = [
     #       Content(parts=[Part("title: Doc | text: Chunk 1")]),  # <-- Treated as Prompt / Input 1
     #       Content(parts=[Part("title: Doc | text: Chunk 2")]),  # <-- Treated as Prompt / Input 2
@@ -317,7 +320,10 @@ def save_analysis_findings(contract_id, analysis):
 
     analysis_data = json.loads(analysis)
 
-    findings = analysis_data.get("findings", [])
+    findings = analysis_data.get(
+        "findings",
+        []
+    )
 
     for finding_data in findings:
 
@@ -332,8 +338,8 @@ def save_analysis_findings(contract_id, analysis):
 
         db.session.add(finding)
 
-        # Flush so SQLAlchemy assigns the finding's ID
-        # before creating FindingChunk records.
+        # Flush the new finding so SQLAlchemy assigns its
+        # database-generated ID before creating FindingChunk rows.
         db.session.flush()
 
         evidence_chunk_indices = finding_data.get(
@@ -363,7 +369,9 @@ def save_analysis_findings(contract_id, analysis):
                 evidence_order=evidence_order
             )
 
-            db.session.add(finding_chunk)
+            db.session.add(
+                finding_chunk
+            )
 
 
 def analyze_contract(contract_id):
@@ -382,6 +390,8 @@ def analyze_contract(contract_id):
     6. Generate embeddings for the chunks.
     7. Store chunks and embeddings in PostgreSQL.
     8. Retrieve relevant chunks for each analysis query.
+    9. Analyze retrieved chunks using Gemini.
+    10. Save findings and evidence mappings.
     """
 
     from app import app
@@ -391,6 +401,7 @@ def analyze_contract(contract_id):
         contract = None
 
         try:
+
             # Find the contract
             contract = db.session.get(
                 Contract,
@@ -560,8 +571,18 @@ def analyze_contract(contract_id):
             )
 
             # --------------------------------------------------
-            # STEP 6: Retrieve relevant contract chunks
+            # STEP 6: Retrieve, analyze, and save findings
             # --------------------------------------------------
+
+            # Remove any existing findings for this contract.
+            #
+            # FindingChunk records are deleted automatically
+            # because their foreign key uses ON DELETE CASCADE.
+            ContractFinding.query.filter_by(
+                contract_id=contract.id
+            ).delete(
+                synchronize_session=False
+            )
 
             for query in ANALYSIS_QUERIES:
 
