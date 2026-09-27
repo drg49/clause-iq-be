@@ -246,33 +246,33 @@ def analyze_retrieved_chunks(query, chunks):
     )
 
     prompt = f"""
-        You are analyzing a contract for ClauseIQ.
+    You are analyzing a contract for ClauseIQ.
 
-        Analysis area:
-        {query}
+    Analysis area:
+    {query}
 
-        Relevant contract sections:
-        {context}
+    Relevant contract sections:
+    {context}
 
-        Identify concrete findings supported by the provided
-        contract sections.
+    Identify concrete findings supported by the provided
+    contract sections.
 
-        Classify each finding as one of:
+    Classify each finding as one of:
 
-        - RISK
-        - MISSING_PROTECTION
-        - NEGOTIATION_OPPORTUNITY
+    - RISK
+    - MISSING_PROTECTION
+    - NEGOTIATION_OPPORTUNITY
 
-        For each finding, determine its severity as:
+    For each finding, determine its severity as:
 
-        - HIGH
-        - MEDIUM
-        - LOW
+    - HIGH
+    - MEDIUM
+    - LOW
 
-        Only identify findings that are supported by the
-        provided contract sections.
+    Only identify findings that are supported by the
+    provided contract sections.
 
-        Return the findings using the provided response schema.
+    Return the findings using the provided response schema.
     """
 
     response = gemini_client.models.generate_content(
