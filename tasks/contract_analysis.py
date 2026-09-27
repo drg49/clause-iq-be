@@ -11,6 +11,7 @@ from pypdf import PdfReader
 from models import db
 from models.contract import Contract
 from models.contract_chunk import ContractChunk
+from tasks.retrieval import retrieve_relevant_chunks
 
 
 S3_BUCKET = "drg-clauses"
@@ -52,6 +53,16 @@ text_splitter = RecursiveCharacterTextSplitter(
 # request comfortably below the model's token limit without
 # requiring a tokenizer just to determine batch boundaries.
 EMBEDDING_BATCH_CHARACTER_LIMIT = 24000
+
+
+# The following queries are used to retrieve relevant contract chunks for each area of analysis.
+ANALYSIS_QUERIES = [
+    "What are the termination rights, termination conditions, notice requirements, and penalties in this contract?",
+    "What are the parties' payment obligations, fees, late charges, and financial penalties?",
+    "What liabilities, indemnification obligations, warranties, or limitations of liability are included?",
+    "What obligations, protections, or requirements are missing that could create risk for a party?",
+    "What provisions could provide an opportunity to negotiate more favorable terms?"
+]
 
 
 def generate_embeddings(chunks, contract_name):
@@ -188,9 +199,7 @@ def analyze_contract(contract_id):
     5. Split the text into overlapping chunks.
     6. Generate embeddings for the chunks.
     7. Store chunks and embeddings in PostgreSQL.
-
-    Vector retrieval, Gemini analysis,
-    and result storage will be added later.
+    8. Retrieve relevant chunks for each analysis query.
     """
 
     from app import app
@@ -369,7 +378,41 @@ def analyze_contract(contract_id):
             )
 
             # --------------------------------------------------
-            # STEP 6: Mark analysis as complete
+            # STEP 6: Retrieve relevant contract chunks
+            # --------------------------------------------------
+
+            for query in ANALYSIS_QUERIES:
+
+                retrieved_chunks = retrieve_relevant_chunks(
+                    contract_id=contract.id,
+                    query=query,
+                    top_k=5
+                )
+
+                print(
+                    f"\n[RAG TEST] Query: {query}"
+                )
+
+                print(
+                    f"[RAG TEST] Retrieved "
+                    f"{len(retrieved_chunks)} chunks"
+                )
+
+                for chunk in retrieved_chunks:
+
+                    print(
+                        f"\n[RAG TEST] "
+                        f"Chunk ID: {chunk.id} | "
+                        f"Chunk Index: {chunk.chunk_index}"
+                    )
+
+                    print(
+                        f"[RAG TEST] Content:\n"
+                        f"{chunk.content}"
+                    )
+
+            # --------------------------------------------------
+            # STEP 7: Mark analysis as complete
             # --------------------------------------------------
 
             contract.status = "ANALYZED"
