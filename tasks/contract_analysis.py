@@ -1,5 +1,6 @@
 import os
 import time
+import json
 from io import BytesIO
 
 import boto3
@@ -11,6 +12,8 @@ from pypdf import PdfReader
 from models import db
 from models.contract import Contract
 from models.contract_chunk import ContractChunk
+from models.contract_finding import ContractFinding
+from models.finding_chunk import FindingChunk
 from tasks.retrieval import retrieve_relevant_chunks
 
 
@@ -306,6 +309,63 @@ Return the findings using the provided response schema.
     return response.text
 
 
+def save_analysis_findings(contract_id, analysis):
+    """
+    Parse Gemini's JSON response and save the findings
+    and their supporting contract chunks to the database.
+    """
+
+    analysis_data = json.loads(analysis)
+
+    findings = analysis_data.get("findings", [])
+
+    for finding_data in findings:
+
+        finding = ContractFinding(
+            contract_id=contract_id,
+            type=finding_data["type"],
+            severity=finding_data["severity"],
+            title=finding_data["title"],
+            explanation=finding_data["explanation"],
+            recommendation=finding_data["recommendation"]
+        )
+
+        db.session.add(finding)
+
+        # Flush so SQLAlchemy assigns the finding's ID
+        # before creating FindingChunk records.
+        db.session.flush()
+
+        evidence_chunk_indices = finding_data.get(
+            "evidence_chunk_indices",
+            []
+        )
+
+        for evidence_order, chunk_index in enumerate(
+            evidence_chunk_indices
+        ):
+
+            chunk = ContractChunk.query.filter_by(
+                contract_id=contract_id,
+                chunk_index=chunk_index
+            ).first()
+
+            if not chunk:
+                raise ValueError(
+                    f"Gemini referenced chunk index "
+                    f"{chunk_index}, but that chunk "
+                    f"does not exist."
+                )
+
+            finding_chunk = FindingChunk(
+                finding_id=finding.id,
+                chunk_id=chunk.id,
+                evidence_order=evidence_order
+            )
+
+            db.session.add(finding_chunk)
+
+
 def analyze_contract(contract_id):
     """
     Background task for analyzing a contract.
@@ -522,6 +582,11 @@ def analyze_contract(contract_id):
 
                 print(
                     f"[GEMINI ANALYSIS] Response:\n{analysis}"
+                )
+
+                save_analysis_findings(
+                    contract_id=contract.id,
+                    analysis=analysis
                 )
 
             # --------------------------------------------------
