@@ -64,6 +64,57 @@ ANALYSIS_QUERIES = [
     "What provisions could provide an opportunity to negotiate more favorable terms?"
 ]
 
+# Schema for validating the structure of analysis responses from Gemini.
+# Ensures that the findings returned by Gemini adhere to the expected format.
+ANALYSIS_RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "findings": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "type": {
+                        "type": "string",
+                        "enum": [
+                            "RISK",
+                            "MISSING_PROTECTION",
+                            "NEGOTIATION_OPPORTUNITY"
+                        ]
+                    },
+                    "severity": {
+                        "type": "string",
+                        "enum": [
+                            "HIGH",
+                            "MEDIUM",
+                            "LOW"
+                        ]
+                    },
+                    "title": {
+                        "type": "string"
+                    },
+                    "explanation": {
+                        "type": "string"
+                    },
+                    "recommendation": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "type",
+                    "severity",
+                    "title",
+                    "explanation",
+                    "recommendation"
+                ]
+            }
+        }
+    },
+    "required": [
+        "findings"
+    ]
+}
+
 
 def generate_embeddings(chunks, contract_name):
     """
@@ -182,6 +233,72 @@ def _embed_batch(chunks, contract_name):
         embedding.values
         for embedding in result.embeddings
     ]
+
+
+def analyze_retrieved_chunks(query, chunks):
+    """
+    Analyze retrieved contract chunks using Gemini.
+
+    Gemini receives the analysis question along with
+    the relevant contract chunks and returns findings
+    in a structured JSON format.
+    """
+
+    context = "\n\n".join(
+        f"[Chunk {chunk.chunk_index}]\n{chunk.content}"
+        for chunk in chunks
+    )
+
+    prompt = f"""
+        You are analyzing a legal contract for ClauseIQ.
+
+        Analysis question:
+        {query}
+
+        Relevant contract sections:
+        {context}
+
+        Identify concrete issues supported by the provided
+        contract sections.
+
+        Classify each finding as one of:
+
+        - RISK
+        - MISSING_PROTECTION
+        - NEGOTIATION_OPPORTUNITY
+
+        For each finding, provide:
+
+        - type
+        - severity
+        - title
+        - explanation
+        - recommendation
+
+        Severity must be one of:
+
+        - HIGH
+        - MEDIUM
+        - LOW
+
+        Only identify findings that are supported by the
+        provided contract sections.
+
+        Return the findings as a JSON array.
+        Do not include any additional text outside the JSON array.
+    """
+
+    response = gemini_client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=prompt
+    )
+
+    if not response.text:
+        raise ValueError(
+            "Gemini returned no analysis"
+        )
+
+    return response.text
 
 
 def analyze_contract(contract_id):
@@ -389,27 +506,18 @@ def analyze_contract(contract_id):
                     top_k=5
                 )
 
-                print(
-                    f"\n[RAG TEST] Query: {query}"
+                analysis = analyze_retrieved_chunks(
+                    query=query,
+                    chunks=retrieved_chunks
                 )
 
                 print(
-                    f"[RAG TEST] Retrieved "
-                    f"{len(retrieved_chunks)} chunks"
+                    f"\n[GEMINI ANALYSIS] Query: {query}"
                 )
 
-                for chunk in retrieved_chunks:
-
-                    print(
-                        f"\n[RAG TEST] "
-                        f"Chunk ID: {chunk.id} | "
-                        f"Chunk Index: {chunk.chunk_index}"
-                    )
-
-                    print(
-                        f"[RAG TEST] Content:\n"
-                        f"{chunk.content}"
-                    )
+                print(
+                    f"[GEMINI ANALYSIS] Response:\n{analysis}"
+                )
 
             # --------------------------------------------------
             # STEP 7: Mark analysis as complete
