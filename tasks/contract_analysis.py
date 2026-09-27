@@ -238,10 +238,6 @@ def _embed_batch(chunks, contract_name):
 def analyze_retrieved_chunks(query, chunks):
     """
     Analyze retrieved contract chunks using Gemini.
-
-    Gemini receives the analysis question along with
-    the relevant contract chunks and returns findings
-    in a structured JSON format.
     """
 
     context = "\n\n".join(
@@ -250,15 +246,15 @@ def analyze_retrieved_chunks(query, chunks):
     )
 
     prompt = f"""
-        You are analyzing a legal contract for ClauseIQ.
+        You are analyzing a contract for ClauseIQ.
 
-        Analysis question:
+        Analysis area:
         {query}
 
         Relevant contract sections:
         {context}
 
-        Identify concrete issues supported by the provided
+        Identify concrete findings supported by the provided
         contract sections.
 
         Classify each finding as one of:
@@ -267,15 +263,7 @@ def analyze_retrieved_chunks(query, chunks):
         - MISSING_PROTECTION
         - NEGOTIATION_OPPORTUNITY
 
-        For each finding, provide:
-
-        - type
-        - severity
-        - title
-        - explanation
-        - recommendation
-
-        Severity must be one of:
+        For each finding, determine its severity as:
 
         - HIGH
         - MEDIUM
@@ -284,13 +272,16 @@ def analyze_retrieved_chunks(query, chunks):
         Only identify findings that are supported by the
         provided contract sections.
 
-        Return the findings as a JSON array.
-        Do not include any additional text outside the JSON array.
+        Return the findings using the provided response schema.
     """
 
     response = gemini_client.models.generate_content(
         model="gemini-2.5-flash",
-        contents=prompt
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=ANALYSIS_RESPONSE_SCHEMA
+        )
     )
 
     if not response.text:
