@@ -6,6 +6,9 @@ from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 
 from models.contract import Contract
+from models.contract_chunk import ContractChunk
+from models.contract_finding import ContractFinding
+from models.finding_chunk import FindingChunk
 from models import db
 
 from tasks.executor import executor
@@ -166,6 +169,89 @@ def upload_contract():
     except Exception as e:
         db.session.rollback()
 
+        return jsonify({
+            "error": str(e)
+        }), 500
+
+
+@contracts.route("/<int:contract_id>/analysis", methods=["GET"])
+@jwt_required()
+def get_contract_analysis(contract_id):
+
+    # Get the logged-in user's ID
+    user_id = get_jwt_identity()
+
+    try:
+        # Find the contract belonging to the logged-in user
+        contract = Contract.query.filter_by(
+            id=contract_id,
+            user_id=user_id
+        ).first()
+
+        # Contract doesn't exist or doesn't belong to this user
+        if not contract:
+            return jsonify({
+                "error": "Contract not found"
+            }), 404
+
+        # Get all findings for this contract
+        findings = ContractFinding.query.filter_by(
+            contract_id=contract.id
+        ).order_by(
+            ContractFinding.id.asc()
+        ).all()
+
+        findings_response = []
+
+        for finding in findings:
+
+            # Get the evidence mappings for this finding
+            evidence_mappings = FindingChunk.query.filter_by(
+                finding_id=finding.id
+            ).order_by(
+                FindingChunk.evidence_order.asc()
+            ).all()
+
+            evidence = []
+
+            for mapping in evidence_mappings:
+
+                # Get the actual contract chunk
+                chunk = db.session.get(
+                    ContractChunk,
+                    mapping.chunk_id
+                )
+
+                if chunk:
+                    evidence.append({
+                        "chunk_id": chunk.id,
+                        "chunk_index": chunk.chunk_index,
+                        "content": chunk.content,
+                        "evidence_order": mapping.evidence_order
+                    })
+
+            findings_response.append({
+                "id": finding.id,
+                "type": finding.type,
+                "severity": finding.severity,
+                "title": finding.title,
+                "explanation": finding.explanation,
+                "recommendation": finding.recommendation,
+                "created_at": finding.created_at,
+                "evidence": evidence
+            })
+
+        return jsonify({
+            "contract": {
+                "id": contract.id,
+                "name": contract.name,
+                "status": contract.status,
+                "created_at": contract.created_at
+            },
+            "findings": findings_response
+        }), 200
+
+    except Exception as e:
         return jsonify({
             "error": str(e)
         }), 500
