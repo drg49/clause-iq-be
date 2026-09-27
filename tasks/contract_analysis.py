@@ -98,6 +98,12 @@ ANALYSIS_RESPONSE_SCHEMA = {
                     },
                     "recommendation": {
                         "type": "string"
+                    },
+                    "evidence_chunk_indices": {
+                        "type": "array",
+                        "items": {
+                            "type": "integer"
+                        }
                     }
                 },
                 "required": [
@@ -105,7 +111,8 @@ ANALYSIS_RESPONSE_SCHEMA = {
                     "severity",
                     "title",
                     "explanation",
-                    "recommendation"
+                    "recommendation",
+                    "evidence_chunk_indices"
                 ]
             }
         }
@@ -246,33 +253,40 @@ def analyze_retrieved_chunks(query, chunks):
     )
 
     prompt = f"""
-    You are analyzing a contract for ClauseIQ.
+You are analyzing a contract for ClauseIQ.
 
-    Analysis area:
-    {query}
+Analysis area:
+{query}
 
-    Relevant contract sections:
-    {context}
+Relevant contract sections:
+{context}
 
-    Identify concrete findings supported by the provided
-    contract sections.
+Each section is labeled with its chunk index.
 
-    Classify each finding as one of:
+For every finding, include the chunk indices that directly
+support the finding in evidence_chunk_indices.
 
-    - RISK
-    - MISSING_PROTECTION
-    - NEGOTIATION_OPPORTUNITY
+Only include chunk indices from the provided sections.
 
-    For each finding, determine its severity as:
+Identify concrete findings supported by the provided
+contract sections.
 
-    - HIGH
-    - MEDIUM
-    - LOW
+Classify each finding as one of:
 
-    Only identify findings that are supported by the
-    provided contract sections.
+- RISK
+- MISSING_PROTECTION
+- NEGOTIATION_OPPORTUNITY
 
-    Return the findings using the provided response schema.
+For each finding, determine its severity as:
+
+- HIGH
+- MEDIUM
+- LOW
+
+Only identify findings that are supported by the
+provided contract sections.
+
+Return the findings using the provided response schema.
     """
 
     response = gemini_client.models.generate_content(
