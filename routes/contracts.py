@@ -27,6 +27,44 @@ s3 = boto3.client(
 S3_BUCKET = "drg-clauses"
 
 
+def get_contract_risk_summary(contract):
+
+    if contract.status != "ANALYZED":
+        return {
+            "overall_risk": None,
+            "findings_count": None
+        }
+
+    findings = ContractFinding.query.filter_by(
+        contract_id=contract.id
+    ).all()
+
+    if not findings:
+        return {
+            "overall_risk": "LOW",
+            "findings_count": 0
+        }
+
+    severity_order = {
+        "LOW": 1,
+        "MEDIUM": 2,
+        "HIGH": 3
+    }
+
+    highest_severity = max(
+        findings,
+        key=lambda finding: severity_order.get(
+            finding.severity,
+            0
+        )
+    ).severity
+
+    return {
+        "overall_risk": highest_severity,
+        "findings_count": len(findings)
+    }
+
+
 @contracts.route("", methods=["GET"])
 @jwt_required()
 def get_contracts():
@@ -72,17 +110,24 @@ def get_contracts():
             limit
         ).all()
 
+        contracts_response = []
+
+        for contract in contracts_list:
+
+            risk_summary = get_contract_risk_summary(contract)
+
+            contracts_response.append({
+                "id": contract.id,
+                "name": contract.name,
+                "s3_key": contract.s3_key,
+                "status": contract.status,
+                "overall_risk": risk_summary["overall_risk"],
+                "findings_count": risk_summary["findings_count"],
+                "created_at": contract.created_at
+            })
+
         return jsonify({
-            "contracts": [
-                {
-                    "id": contract.id,
-                    "name": contract.name,
-                    "s3_key": contract.s3_key,
-                    "status": contract.status,
-                    "created_at": contract.created_at
-                }
-                for contract in contracts_list
-            ],
+            "contracts": contracts_response,
             "pagination": {
                 "limit": limit,
                 "offset": offset,
@@ -194,6 +239,8 @@ def get_contract_analysis(contract_id):
                 "error": "Contract not found"
             }), 404
 
+        risk_summary = get_contract_risk_summary(contract)
+
         # Get all findings for this contract
         findings = ContractFinding.query.filter_by(
             contract_id=contract.id
@@ -246,6 +293,8 @@ def get_contract_analysis(contract_id):
                 "id": contract.id,
                 "name": contract.name,
                 "status": contract.status,
+                "overall_risk": risk_summary["overall_risk"],
+                "findings_count": risk_summary["findings_count"],
                 "created_at": contract.created_at
             },
             "findings": findings_response
