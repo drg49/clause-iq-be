@@ -306,6 +306,46 @@ def get_contract_analysis(contract_id):
         }), 500
 
 
+@contracts.route("/<int:contract_id>/preview", methods=["GET"])
+@jwt_required()
+def preview_contract(contract_id):
+
+    user_id = get_jwt_identity()
+
+    try:
+        contract = Contract.query.filter_by(
+            id=contract_id,
+            user_id=user_id
+        ).first()
+
+        if not contract:
+            return jsonify({
+                "error": "Contract not found"
+            }), 404
+
+        expires_in = 300
+        preview_url = s3.generate_presigned_url(
+            "get_object",
+            Params={
+                "Bucket": S3_BUCKET,
+                "Key": contract.s3_key,
+                "ResponseContentType": "application/pdf",
+                "ResponseContentDisposition": "inline"
+            },
+            ExpiresIn=expires_in
+        )
+
+        return jsonify({
+            "preview_url": preview_url,
+            "expires_in": expires_in
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            "error": str(e)
+        }), 500
+
+
 @contracts.route("/<int:contract_id>", methods=["DELETE"])
 @jwt_required()
 def delete_contract(contract_id):
